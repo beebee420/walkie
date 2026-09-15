@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Play, Pause, Mic, Square, X, SkipForward, SkipBack, Radio, User, ArrowLeft, Volume2, Maximize2, RotateCcw, RotateCw, Plus } from "lucide-react";
 import { supabase } from "./lib/supabaseClient";
+import { FFmpeg } from "@ffmpeg/ffmpeg";
+import { fetchFile, toBlobURL } from "@ffmpeg/util";
 
 const MAX_CAPTION_LENGTH = 120;
 
@@ -81,17 +83,136 @@ function audioBufferToWavBlob(audioBuffer) {
   return new Blob([view], { type: "audio/wav" });
 }
 
+let ffmpegLoadPromise = null;
+
+// loads (once, cached for the session) a WebAssembly build of FFmpeg that
+// runs entirely in the browser — used to pull audio out of a video directly,
+// without needing to play through it in real time
+function getFFmpeg() {
+  if (!ffmpegLoadPromise) {
+    ffmpegLoadPromise = (async () => {
+      const ffmpeg = new FFmpeg();
+      const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+      });
+      return ffmpeg;
+    })();
+  }
+  return ffmpegLoadPromise;
+}
+
+// fast path: process the video file directly via ffmpeg.wasm instead of
+// playing through it. Tries a lossless stream copy first (near-instant),
+// and only re-encodes if the source audio codec can't go straight into m4a.
+async function extractAudioFromVideoViaFFmpeg(file) {
+  const ffmpeg = await getFFmpeg();
+  const ext = file.name.match(/\.[a-zA-Z0-9]+$/)?.[0] || ".mov";
+  const inputName = `input${ext}`;
+
+  await ffmpeg.writeFile(inputName, await fetchFile(file));
+
+  const cleanup = async (...names) => {
+    for (const n of names) {
+      await ffmpeg.deleteFile(n).catch(() => {});
+    }
+  };
+
+  try {
+    await ffmpeg.exec(["-i", inputName, "-vn", "-acodec", "copy", "output.m4a"]);
+    const data = await ffmpeg.readFile("output.m4a");
+    await cleanup(inputName, "output.m4a");
+    return new Blob([data.buffer], { type: "audio/mp4" });
+  } catch (copyErr) {
+    console.warn("ffmpeg stream copy failed, re-encoding instead:", copyErr);
+    await ffmpeg.exec(["-i", inputName, "-vn", "-acodec", "libmp3lame", "-b:a", "128k", "output.mp3"]);
+    const data = await ffmpeg.readFile("output.mp3");
+    await cleanup(inputName, "output.mp3");
+    return new Blob([data.buffer], { type: "audio/mpeg" });
+  }
+}
+
+// fallback for when decodeAudioData can't parse the video's container directly
+// (common on iOS with .mov files) — plays the video muted and records just
+// its audio track in real time instead
+function extractAudioFromVideoViaPlayback(file) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const video = document.createElement("video");
+    video.src = url;
+    video.muted = true;
+    video.playsInline = true;
+
+    const cleanup = () => URL.revokeObjectURL(url);
+
+    video.addEventListener("loadedmetadata", () => {
+      let stream;
+      try {
+        stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
+      } catch (err) {
+        cleanup();
+        reject(err);
+        return;
+      }
+      const audioTracks = stream.getAudioTracks();
+      if (!audioTracks.length) {
+        cleanup();
+        reject(new Error("no audio track found in video"));
+        return;
+      }
+      let recorder;
+      try {
+        recorder = new MediaRecorder(new MediaStream(audioTracks));
+      } catch (err) {
+        cleanup();
+        reject(err);
+        return;
+      }
+      const chunks = [];
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      recorder.onstop = () => {
+        cleanup();
+        resolve(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
+      };
+      video.addEventListener("ended", () => recorder.stop());
+      recorder.start();
+      video.play().catch((err) => {
+        recorder.stop();
+        reject(err);
+      });
+    });
+
+    video.addEventListener("error", () => {
+      cleanup();
+      reject(new Error("video failed to load"));
+    });
+  });
+}
+
 // extracts just the audio track from a video file, returning a real
 // audio-only Blob — lets someone upload a video and post its audio
 async function extractAudioFromVideo(file) {
-  const arrayBuffer = await file.arrayBuffer();
-  const AudioCtx = window.AudioContext || window.webkitAudioContext;
-  const audioCtx = new AudioCtx();
   try {
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    return audioBufferToWavBlob(audioBuffer);
-  } finally {
-    audioCtx.close();
+    return await extractAudioFromVideoViaFFmpeg(file);
+  } catch (ffmpegErr) {
+    console.warn("ffmpeg extraction failed, falling back to decodeAudioData:", ffmpegErr);
+  }
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioCtx();
+    try {
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      return audioBufferToWavBlob(audioBuffer);
+    } finally {
+      audioCtx.close();
+    }
+  } catch (decodeErr) {
+    console.warn("decodeAudioData couldn't parse the video directly, falling back to playback capture:", decodeErr);
+    return await extractAudioFromVideoViaPlayback(file);
   }
 }
 
@@ -1417,14 +1538,14 @@ function WalkieApp({ username, userId }) {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => openReply(post)}
-                    className={`text-xs font-medium text-neutral-600 border border-neutral-300 px-3 py-2 rounded-full flex-shrink-0 active:bg-neutral-100 ${
-                      post.user === ME ? "invisible pointer-events-none" : ""
-                    }`}
-                  >
-                    reply
-                  </button>
+                  {post.user !== ME && (
+                    <button
+                      onClick={() => openReply(post)}
+                      className="text-xs font-medium text-neutral-600 border border-neutral-300 px-3 py-2 rounded-full flex-shrink-0 active:bg-neutral-100"
+                    >
+                      reply
+                    </button>
+                  )}
                 </div>
 
                 {post.user === ME ? (
