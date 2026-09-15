@@ -25,11 +25,87 @@ function getPublicAudioUrl(path) {
   return supabase.storage.from("audio").getPublicUrl(path).data.publicUrl;
 }
 
+function writeWavString(view, offset, str) {
+  for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+}
+
+function interleaveChannels(left, right) {
+  const length = left.length + right.length;
+  const result = new Float32Array(length);
+  let index = 0;
+  let inputIndex = 0;
+  while (index < length) {
+    result[index++] = left[inputIndex];
+    result[index++] = right[inputIndex];
+    inputIndex++;
+  }
+  return result;
+}
+
+// converts a decoded AudioBuffer (e.g. from a video's audio track) into a
+// real, standalone audio/wav Blob that can be uploaded and played normally
+function audioBufferToWavBlob(audioBuffer) {
+  const numChannels = Math.min(2, audioBuffer.numberOfChannels);
+  const sampleRate = audioBuffer.sampleRate;
+  const bitDepth = 16;
+
+  const samples =
+    numChannels === 2
+      ? interleaveChannels(audioBuffer.getChannelData(0), audioBuffer.getChannelData(1))
+      : audioBuffer.getChannelData(0);
+
+  const dataLength = samples.length * (bitDepth / 8);
+  const buffer = new ArrayBuffer(44 + dataLength);
+  const view = new DataView(buffer);
+
+  writeWavString(view, 0, "RIFF");
+  view.setUint32(4, 36 + dataLength, true);
+  writeWavString(view, 8, "WAVE");
+  writeWavString(view, 12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); // PCM
+  view.setUint16(22, numChannels, true);
+  view.setUint32(24, sampleRate, true);
+  view.setUint32(28, sampleRate * numChannels * (bitDepth / 8), true);
+  view.setUint16(32, numChannels * (bitDepth / 8), true);
+  view.setUint16(34, bitDepth, true);
+  writeWavString(view, 36, "data");
+  view.setUint32(40, dataLength, true);
+
+  let offset = 44;
+  for (let i = 0; i < samples.length; i++, offset += 2) {
+    const s = Math.max(-1, Math.min(1, samples[i]));
+    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
+  }
+
+  return new Blob([view], { type: "audio/wav" });
+}
+
+// extracts just the audio track from a video file, returning a real
+// audio-only Blob — lets someone upload a video and post its audio
+async function extractAudioFromVideo(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const audioCtx = new AudioCtx();
+  try {
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    return audioBufferToWavBlob(audioBuffer);
+  } finally {
+    audioCtx.close();
+  }
+}
+
 // uploads a browser blob: URL's underlying audio data to the 'audio' bucket,
 // returning the storage path (not the public URL) for saving on the row
 async function uploadAudioToStorage(blobUrl, userId) {
   const blob = await (await fetch(blobUrl)).blob();
-  const ext = blob.type.includes("webm") ? "webm" : blob.type.includes("mp4") ? "m4a" : "mp3";
+  const ext = blob.type.includes("webm")
+    ? "webm"
+    : blob.type.includes("wav")
+    ? "wav"
+    : blob.type.includes("mp4")
+    ? "m4a"
+    : "mp3";
   const path = `${userId}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`;
   const { error } = await supabase.storage.from("audio").upload(path, blob, {
     contentType: blob.type || "audio/webm",
@@ -226,6 +302,7 @@ function WalkieApp({ username, userId }) {
   const [captionPlayhead, setCaptionPlayhead] = useState(0);
   const [captionPlaying, setCaptionPlaying] = useState(false);
   const [micError, setMicError] = useState(null);
+  const [convertingVideo, setConvertingVideo] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [deleteReplyConfirmId, setDeleteReplyConfirmId] = useState(null);
   const [waveform, setWaveform] = useState([]);
@@ -1050,15 +1127,34 @@ function WalkieApp({ username, userId }) {
     }, 1000);
   };
 
-  const handleFileSelect = (e) => {
+  const handleFileSelect = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
+
     clearInterval(recordIntervalRef.current);
     setIsRecording(false);
+    setMicError(null);
     setUploadedFile(file.name);
     setUploadedDuration(null);
 
-    const url = URL.createObjectURL(file);
+    let workingBlob = file;
+
+    if (file.type.startsWith("video/")) {
+      setConvertingVideo(true);
+      try {
+        workingBlob = await extractAudioFromVideo(file);
+      } catch (err) {
+        console.error("failed to extract audio from video:", err);
+        setConvertingVideo(false);
+        setUploadedFile(null);
+        setMicError("couldn't pull audio out of that video — try a different file");
+        e.target.value = "";
+        return;
+      }
+      setConvertingVideo(false);
+    }
+
+    const url = URL.createObjectURL(workingBlob);
     setUploadedFileUrl(url);
     const audio = composeAudioRef.current;
     if (audio) {
@@ -1321,14 +1417,14 @@ function WalkieApp({ username, userId }) {
                     </div>
                   </div>
 
-                  {post.user !== ME && (
-                    <button
-                      onClick={() => openReply(post)}
-                      className="text-xs font-medium text-neutral-600 border border-neutral-300 px-3 py-2 rounded-full flex-shrink-0 active:bg-neutral-100"
-                    >
-                      reply
-                    </button>
-                  )}
+                  <button
+                    onClick={() => openReply(post)}
+                    className={`text-xs font-medium text-neutral-600 border border-neutral-300 px-3 py-2 rounded-full flex-shrink-0 active:bg-neutral-100 ${
+                      post.user === ME ? "invisible pointer-events-none" : ""
+                    }`}
+                  >
+                    reply
+                  </button>
                 </div>
 
                 {post.user === ME ? (
@@ -2314,6 +2410,9 @@ function WalkieApp({ username, userId }) {
                   {uploadedFile ? (
                     <div className="mt-4 text-center">
                       <p className="text-sm text-neutral-700 truncate max-w-full">{uploadedFile}</p>
+                      {convertingVideo && (
+                        <p className="text-xs text-neutral-400 mt-1">extracting audio from video...</p>
+                      )}
                     </div>
                   ) : (
                     <p className="text-sm text-neutral-500 mt-4">
@@ -2335,11 +2434,16 @@ function WalkieApp({ username, userId }) {
                   {!isRecording && recordSeconds === 0 && !uploadedFile && (
                     <label className="mt-6 inline-block text-center border border-neutral-300 text-neutral-700 text-sm font-medium px-6 py-3 rounded-full active:bg-neutral-100 cursor-pointer">
                       upload audio file
-                      <input type="file" accept="audio/*" onChange={handleFileSelect} className="hidden" />
+                      <input
+                        type="file"
+                        accept="audio/*,video/*,.m4a,.mp3,.wav,.aac,.caf,.aiff,.flac,.ogg"
+                        onChange={handleFileSelect}
+                        className="hidden"
+                      />
                     </label>
                   )}
 
-                  {uploadedFile && (
+                  {uploadedFile && !convertingVideo && (
                     <div className="mt-6 w-full flex gap-3">
                       <button
                         onClick={() => {
