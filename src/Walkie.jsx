@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Play, Pause, Mic, Square, X, SkipForward, SkipBack, Radio, User, ArrowLeft, Volume2, Maximize2, RotateCcw, RotateCw, Plus } from "lucide-react";
 import { supabase } from "./lib/supabaseClient";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
-import { fetchFile, toBlobURL } from "@ffmpeg/util";
+import { fetchFile } from "@ffmpeg/util";
 
 const MAX_CAPTION_LENGTH = 120;
 
@@ -94,8 +94,8 @@ function getFFmpeg() {
       const ffmpeg = new FFmpeg();
       const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
       await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+        coreURL: `${baseURL}/ffmpeg-core.js`,
+        wasmURL: `${baseURL}/ffmpeg-core.wasm`,
       });
       return ffmpeg;
     })();
@@ -133,86 +133,24 @@ async function extractAudioFromVideoViaFFmpeg(file) {
   }
 }
 
-// fallback for when decodeAudioData can't parse the video's container directly
-// (common on iOS with .mov files) — plays the video muted and records just
-// its audio track in real time instead
-function extractAudioFromVideoViaPlayback(file) {
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const video = document.createElement("video");
-    video.src = url;
-    video.muted = true;
-    video.playsInline = true;
-
-    const cleanup = () => URL.revokeObjectURL(url);
-
-    video.addEventListener("loadedmetadata", () => {
-      let stream;
-      try {
-        stream = video.captureStream ? video.captureStream() : video.mozCaptureStream();
-      } catch (err) {
-        cleanup();
-        reject(err);
-        return;
-      }
-      const audioTracks = stream.getAudioTracks();
-      if (!audioTracks.length) {
-        cleanup();
-        reject(new Error("no audio track found in video"));
-        return;
-      }
-      let recorder;
-      try {
-        recorder = new MediaRecorder(new MediaStream(audioTracks));
-      } catch (err) {
-        cleanup();
-        reject(err);
-        return;
-      }
-      const chunks = [];
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-      recorder.onstop = () => {
-        cleanup();
-        resolve(new Blob(chunks, { type: recorder.mimeType || "audio/webm" }));
-      };
-      video.addEventListener("ended", () => recorder.stop());
-      recorder.start();
-      video.play().catch((err) => {
-        recorder.stop();
-        reject(err);
-      });
-    });
-
-    video.addEventListener("error", () => {
-      cleanup();
-      reject(new Error("video failed to load"));
-    });
-  });
-}
-
 // extracts just the audio track from a video file, returning a real
-// audio-only Blob — lets someone upload a video and post its audio
+// audio-only Blob — lets someone upload a video and post its audio.
+// Only tries fast, non-realtime methods; if both fail, the caller shows an
+// immediate error rather than falling back to a slow real-time approach.
 async function extractAudioFromVideo(file) {
   try {
     return await extractAudioFromVideoViaFFmpeg(file);
   } catch (ffmpegErr) {
     console.warn("ffmpeg extraction failed, falling back to decodeAudioData:", ffmpegErr);
   }
+  const arrayBuffer = await file.arrayBuffer();
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  const audioCtx = new AudioCtx();
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const audioCtx = new AudioCtx();
-    try {
-      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-      return audioBufferToWavBlob(audioBuffer);
-    } finally {
-      audioCtx.close();
-    }
-  } catch (decodeErr) {
-    console.warn("decodeAudioData couldn't parse the video directly, falling back to playback capture:", decodeErr);
-    return await extractAudioFromVideoViaPlayback(file);
+    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+    return audioBufferToWavBlob(audioBuffer);
+  } finally {
+    audioCtx.close();
   }
 }
 
@@ -1268,7 +1206,7 @@ function WalkieApp({ username, userId }) {
         console.error("failed to extract audio from video:", err);
         setConvertingVideo(false);
         setUploadedFile(null);
-        setMicError("couldn't pull audio out of that video — try a different file");
+        setMicError("couldn't get audio out of that video on this device — try an audio file instead");
         e.target.value = "";
         return;
       }
