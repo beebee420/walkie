@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Play, Pause, Mic, Square, X, SkipForward, SkipBack, Radio, User, ArrowLeft, Volume2, Maximize2, RotateCcw, RotateCw, Plus } from "lucide-react";
+import { Play, Pause, Mic, X, SkipForward, SkipBack, Radio, User, ArrowLeft, Volume2, Maximize2, RotateCcw, RotateCw, Plus } from "lucide-react";
 import { supabase } from "./lib/supabaseClient";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
@@ -295,18 +295,30 @@ function WalkieApp({ username, userId }) {
     };
   };
 
+  const POSTS_PAGE_SIZE = 20;
+  const [hasMorePosts, setHasMorePosts] = useState(true);
+  const [loadingMorePosts, setLoadingMorePosts] = useState(false);
+  const postsOffsetRef = useRef(0);
+  const repliesByPostRef = useRef({});
+
   const loadFeed = async () => {
     setFeedLoading(true);
     setFeedError(null);
     try {
       const [postsRes, repliesRes] = await Promise.all([
-        supabase.from("posts").select("*, profiles(username)").order("created_at", { ascending: false }),
+        supabase
+          .from("posts")
+          .select("*, profiles(username)")
+          .order("created_at", { ascending: false })
+          .range(0, POSTS_PAGE_SIZE - 1),
+        // replies are already scoped by RLS to just your own posts' replies
+        // and replies you've sent — a naturally small, per-user set — so
+        // these aren't paginated for now, only the open-ended posts feed is.
         supabase.from("replies").select("*, profiles(username)").order("created_at", { ascending: true }),
       ]);
       if (postsRes.error) throw postsRes.error;
       if (repliesRes.error) throw repliesRes.error;
 
-      const shapedPosts = postsRes.data.map((row) => shapeRow(row));
       const repliesByPost = {};
       for (const row of repliesRes.data) {
         const reply = shapeRow(row);
@@ -314,10 +326,15 @@ function WalkieApp({ username, userId }) {
         delete reply.replies;
         (repliesByPost[row.post_id] ||= []).push(reply);
       }
+      repliesByPostRef.current = repliesByPost;
+
+      const shapedPosts = postsRes.data.map((row) => shapeRow(row));
       const withReplies = shapedPosts.map((p) => ({ ...p, replies: repliesByPost[p.id] || [] }));
 
       setPosts(withReplies);
       setMyPosts(withReplies.filter((p) => p.user === ME));
+      postsOffsetRef.current = postsRes.data.length;
+      setHasMorePosts(postsRes.data.length === POSTS_PAGE_SIZE);
     } catch (err) {
       console.error("failed to load feed:", err);
       setFeedError("couldn't load the feed — check your connection and try refreshing");
@@ -326,10 +343,42 @@ function WalkieApp({ username, userId }) {
     }
   };
 
+  const loadMorePosts = async () => {
+    if (loadingMorePosts || !hasMorePosts) return;
+    setLoadingMorePosts(true);
+    try {
+      const from = postsOffsetRef.current;
+      const { data, error } = await supabase
+        .from("posts")
+        .select("*, profiles(username)")
+        .order("created_at", { ascending: false })
+        .range(from, from + POSTS_PAGE_SIZE - 1);
+      if (error) throw error;
+
+      const shaped = data.map((row) => shapeRow(row));
+      const withReplies = shaped.map((p) => ({ ...p, replies: repliesByPostRef.current[p.id] || [] }));
+
+      setPosts((prev) => [...prev, ...withReplies]);
+      setMyPosts((prev) => [...prev, ...withReplies.filter((p) => p.user === ME)]);
+      postsOffsetRef.current = from + data.length;
+      setHasMorePosts(data.length === POSTS_PAGE_SIZE);
+    } catch (err) {
+      console.error("failed to load more posts:", err);
+    } finally {
+      setLoadingMorePosts(false);
+    }
+  };
+
   useEffect(() => {
     loadFeed();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // infinite scroll: load the next page automatically as the bottom of the
+  // feed comes into view, instead of loading everything up front
+  const feedSentinelRef = useRef(null);
+  const loadMorePostsRef = useRef(loadMorePosts);
+  loadMorePostsRef.current = loadMorePosts;
 
   const [expandedReplies, setExpandedReplies] = useState(null);
   const [playingId, setPlayingId] = useState(null);
@@ -338,6 +387,20 @@ function WalkieApp({ username, userId }) {
   const [mixtapeQueue, setMixtapeQueue] = useState([]);
   const [mixtapeCurrentId, setMixtapeCurrentId] = useState(null);
   const [view, setView] = useState("feed"); // feed | profile | userProfile
+
+  useEffect(() => {
+    const el = feedSentinelRef.current;
+    if (!el || view !== "feed") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) loadMorePostsRef.current();
+      },
+      { rootMargin: "400px" }
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [view]);
+
   const [modalMode, setModalMode] = useState(null); // null | record | reply
   const [viewedUser, setViewedUser] = useState(null);
   const [replyTarget, setReplyTarget] = useState(null);
@@ -362,8 +425,12 @@ function WalkieApp({ username, userId }) {
   const [captionPlaying, setCaptionPlaying] = useState(false);
   const [micError, setMicError] = useState(null);
   const [convertingVideo, setConvertingVideo] = useState(false);
+  const [showFinishRecordingConfirm, setShowFinishRecordingConfirm] = useState(false);
   const [deleteConfirmId, setDeleteConfirmId] = useState(null);
   const [deleteReplyConfirmId, setDeleteReplyConfirmId] = useState(null);
+  const [editingPostId, setEditingPostId] = useState(null);
+  const [editCaptionText, setEditCaptionText] = useState("");
+  const [savingCaption, setSavingCaption] = useState(false);
   const [waveform, setWaveform] = useState([]);
   const [waveformLoading, setWaveformLoading] = useState(false);
 
@@ -386,6 +453,7 @@ function WalkieApp({ username, userId }) {
   const justStartedPlayingRef = useRef(false);
   const uploadedFileRef = useRef(null);
   const mediaRecorderRef = useRef(null);
+  const hasPausedRecordingRef = useRef(false);
   const micStreamRef = useRef(null);
   const recordedChunksRef = useRef([]);
   const recordSecondsRef = useRef(0);
@@ -446,6 +514,14 @@ function WalkieApp({ username, userId }) {
     const audio = mainAudioRef.current;
     const offset = post.audioOffset || 0;
     audioMetaRef.current = { offset, duration: post.duration };
+
+    if ("mediaSession" in navigator) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: post.caption || "voice post",
+        artist: displayName(post.user),
+        album: "walkie",
+      });
+    }
 
     // Reassigning .src even to the same value forces a reload, so only do it
     // when the resource is actually changing.
@@ -632,6 +708,7 @@ function WalkieApp({ username, userId }) {
     };
     const move = (e) => {
       if (!trimDragRef.current || !trimTrackRef.current) return;
+      if (e.cancelable) e.preventDefault();
       const value = getValue(e);
       const minGap = 1;
       const syncAudio = (t) => {
@@ -689,7 +766,7 @@ function WalkieApp({ username, userId }) {
     };
     window.addEventListener("mousemove", move);
     window.addEventListener("mouseup", up);
-    window.addEventListener("touchmove", move, { passive: true });
+    window.addEventListener("touchmove", move, { passive: false });
     window.addEventListener("touchend", up);
     return () => {
       window.removeEventListener("mousemove", move);
@@ -896,6 +973,15 @@ function WalkieApp({ username, userId }) {
     setCaptionPlaying(true);
   };
 
+  const skipReviewBy = (delta) => {
+    const next = Math.max(trimLeft, Math.min(trimRight, playhead + delta));
+    setPlayhead(next);
+    const audio = composeAudioRef.current;
+    if (uploadedFile && audio && isFinite(audio.duration)) {
+      audio.currentTime = next;
+    }
+  };
+
   const skipCaptionBy = (delta) => {
     const finalDuration = trimRight - trimLeft;
     const next = Math.max(0, Math.min(finalDuration, captionPlayhead + delta));
@@ -976,6 +1062,22 @@ function WalkieApp({ username, userId }) {
       });
   };
 
+  const saveEditedCaption = async () => {
+    const id = editingPostId;
+    const newCaption = editCaptionText.trim();
+    setSavingCaption(true);
+    const { error } = await supabase.from("posts").update({ caption: newCaption }).eq("id", id);
+    setSavingCaption(false);
+    if (error) {
+      console.error("failed to update caption:", error);
+      return;
+    }
+    const applyEdit = (list) => list.map((p) => (p.id === id ? { ...p, caption: newCaption } : p));
+    setPosts(applyEdit);
+    setMyPosts(applyEdit);
+    setEditingPostId(null);
+  };
+
   const deleteReply = (replyId) => {
     if (playingId === replyId) stopPlayback();
     const stripReply = (list) =>
@@ -1046,6 +1148,26 @@ function WalkieApp({ username, userId }) {
     setPlayingId(post.id);
   };
 
+  // let the lock screen / Control Center's own play, pause, and skip buttons
+  // actually control playback, and keep its play/pause icon accurate
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.setActionHandler("play", () => {
+      if (currentPost) handlePlay(currentPost);
+    });
+    navigator.mediaSession.setActionHandler("pause", () => {
+      pausePlayback();
+    });
+    navigator.mediaSession.setActionHandler("previoustrack", mixtape ? () => goBack() : null);
+    navigator.mediaSession.setActionHandler("nexttrack", mixtape ? () => advance() : null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentPost, mixtape]);
+
+  useEffect(() => {
+    if (!("mediaSession" in navigator)) return;
+    navigator.mediaSession.playbackState = playingId ? "playing" : "paused";
+  }, [playingId]);
+
   const startMixtape = (list = posts) => {
     if (list.length === 0) return;
     setMixtapeQueue(list);
@@ -1085,6 +1207,9 @@ function WalkieApp({ username, userId }) {
       mediaRecorderRef.current.stop();
     }
     if (micStreamRef.current) micStreamRef.current.getTracks().forEach((t) => t.stop());
+    mediaRecorderRef.current = null;
+    hasPausedRecordingRef.current = false;
+    setShowFinishRecordingConfirm(false);
     setModalMode(null);
     setIsRecording(false);
     setRecordSeconds(0);
@@ -1125,18 +1250,40 @@ function WalkieApp({ username, userId }) {
 
   const toggleRecord = async () => {
     if (isRecording) {
+      // pause, don't finalize — the session stays alive so it can resume
       stopRecordingTimer();
       setIsRecording(false);
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-        mediaRecorderRef.current.stop(); // onstop fires finishRealRecording
+      if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
+        mediaRecorderRef.current.pause();
+        hasPausedRecordingRef.current = true;
       }
       return;
     }
 
+    // resuming a session we already paused
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state === "paused") {
+      mediaRecorderRef.current.resume();
+      setIsRecording(true);
+      recordIntervalRef.current = setInterval(() => {
+        setRecordSeconds((s) => {
+          if (s + 1 >= MAX_RECORD_SECONDS) {
+            stopRecordingTimer();
+            setIsRecording(false);
+            if (mediaRecorderRef.current?.state !== "inactive") mediaRecorderRef.current.stop();
+            return MAX_RECORD_SECONDS;
+          }
+          return s + 1;
+        });
+      }, 1000);
+      return;
+    }
+
+    // starting a brand new recording
     setMicError(null);
     setUploadedFile(null);
     setUploadedFileUrl(null);
     setUploadedDuration(null);
+    hasPausedRecordingRef.current = false;
 
     if (navigator.mediaDevices?.getUserMedia && typeof MediaRecorder !== "undefined") {
       try {
@@ -1184,6 +1331,35 @@ function WalkieApp({ username, userId }) {
         return s + 1;
       });
     }, 1000);
+  };
+
+  const finalizeRecordingNow = () => {
+    setShowFinishRecordingConfirm(false);
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.stop(); // onstop fires finishRealRecording -> enterTrimStep
+    } else {
+      goToTrimStep(); // simulated fallback path
+    }
+  };
+
+  const handleNextFromRecording = () => {
+    if (hasPausedRecordingRef.current) {
+      setShowFinishRecordingConfirm(true);
+    } else {
+      finalizeRecordingNow();
+    }
+  };
+
+  const discardPausedRecording = () => {
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
+      mediaRecorderRef.current.onstop = null; // discard — don't advance into trim
+      mediaRecorderRef.current.stop();
+    }
+    if (micStreamRef.current) micStreamRef.current.getTracks().forEach((t) => t.stop());
+    mediaRecorderRef.current = null;
+    recordedChunksRef.current = [];
+    hasPausedRecordingRef.current = false;
+    setRecordSeconds(0);
   };
 
   const handleFileSelect = async (e) => {
@@ -1693,7 +1869,19 @@ function WalkieApp({ username, userId }) {
             const pct = (isPlaying || loadedIdRef.current === post.id) ? Math.min(100, (progress / post.duration) * 100) : 0;
             return (
               <div key={post.id} className="px-5 py-4 border-b border-neutral-100">
-                <p className="text-sm text-neutral-700 mb-3 break-words">{post.caption}</p>
+                <div className="flex items-start justify-between gap-3 mb-3">
+                  <p className="text-sm text-neutral-700 break-words flex-1">{post.caption}</p>
+                  <button
+                    onClick={() => {
+                      setEditingPostId(post.id);
+                      setEditCaptionText(post.caption || "");
+                    }}
+                    aria-label="edit caption"
+                    className="text-xs font-medium text-neutral-500 flex-shrink-0"
+                  >
+                    edit
+                  </button>
+                </div>
                 <div className="flex items-center gap-3">
                   <button
                     onClick={() => handlePlay(post)}
@@ -1792,6 +1980,11 @@ function WalkieApp({ username, userId }) {
               </div>
             );
           })}
+
+          <div ref={feedSentinelRef} className="h-1" />
+          {loadingMorePosts && (
+            <p className="text-center text-xs text-neutral-400 py-4">loading more...</p>
+          )}
         </div>
         )}
 
@@ -2074,6 +2267,70 @@ function WalkieApp({ username, userId }) {
           </div>
         )}
 
+        {/* finish recording confirmation */}
+        {showFinishRecordingConfirm && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-20 px-6">
+            <div className="w-full max-w-xs bg-white rounded-2xl p-5">
+              <p className="text-sm font-medium text-neutral-900 text-center">are you finished recording?</p>
+              <div className="flex gap-3 mt-5">
+                <button
+                  onClick={() => setShowFinishRecordingConfirm(false)}
+                  className="flex-1 border border-neutral-300 text-neutral-700 text-sm font-medium py-2.5 rounded-full"
+                >
+                  cancel
+                </button>
+                <button
+                  onClick={finalizeRecordingNow}
+                  className="flex-1 bg-neutral-900 text-white text-sm font-medium py-2.5 rounded-full"
+                >
+                  yes, finish
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* edit caption */}
+        {editingPostId !== null && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-20 px-6">
+            <div className="w-full max-w-xs bg-white rounded-2xl p-5">
+              <p className="text-sm font-medium text-neutral-900 mb-3">edit caption</p>
+              <textarea
+                value={editCaptionText}
+                onChange={(e) => {
+                  if (e.target.value.length <= MAX_CAPTION_LENGTH) setEditCaptionText(e.target.value);
+                }}
+                maxLength={MAX_CAPTION_LENGTH}
+                rows={3}
+                autoFocus
+                className="w-full text-sm text-neutral-900 border border-neutral-200 rounded-xl p-3 resize-none break-words focus:outline-none focus:border-neutral-400"
+              />
+              <p
+                className={`text-xs mt-1 text-right ${
+                  editCaptionText.length >= MAX_CAPTION_LENGTH ? "text-red-500" : "text-neutral-400"
+                }`}
+              >
+                {editCaptionText.length}/{MAX_CAPTION_LENGTH}
+              </p>
+              <div className="flex gap-3 mt-4">
+                <button
+                  onClick={() => setEditingPostId(null)}
+                  className="flex-1 border border-neutral-300 text-neutral-700 text-sm font-medium py-2.5 rounded-full"
+                >
+                  cancel
+                </button>
+                <button
+                  onClick={saveEditedCaption}
+                  disabled={savingCaption}
+                  className="flex-1 bg-neutral-900 text-white text-sm font-medium py-2.5 rounded-full disabled:opacity-50"
+                >
+                  {savingCaption ? "saving..." : "save"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* delete reply confirmation */}
         {deleteReplyConfirmId !== null && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-20 px-6">
@@ -2186,17 +2443,37 @@ function WalkieApp({ username, userId }) {
                   const rightPct = clipDuration > 0 ? (trimRight / clipDuration) * 100 : 100;
                   return (
                     <div className="flex flex-col items-center py-4 w-full">
-                      <button
-                        onClick={toggleReviewPlay}
-                        className="w-16 h-16 rounded-full bg-neutral-900 text-white flex items-center justify-center mb-6"
-                        aria-label={isPlaying ? "pause" : "play"}
-                      >
-                        {isPlaying ? (
-                          <Pause size={20} fill="white" />
-                        ) : (
-                          <Play size={20} fill="white" className="ml-0.5" />
-                        )}
-                      </button>
+                      <div className="flex items-center gap-6 mb-6">
+                        <button
+                          onClick={() => skipReviewBy(-10)}
+                          className="flex flex-col items-center gap-1 text-neutral-400 active:scale-90 active:text-neutral-900 transition-transform"
+                          aria-label="back 10 seconds"
+                        >
+                          <RotateCcw size={20} />
+                          <span className="text-[10px]">10</span>
+                        </button>
+
+                        <button
+                          onClick={toggleReviewPlay}
+                          className="w-16 h-16 rounded-full bg-neutral-900 text-white flex items-center justify-center"
+                          aria-label={isPlaying ? "pause" : "play"}
+                        >
+                          {isPlaying ? (
+                            <Pause size={20} fill="white" />
+                          ) : (
+                            <Play size={20} fill="white" className="ml-0.5" />
+                          )}
+                        </button>
+
+                        <button
+                          onClick={() => skipReviewBy(10)}
+                          className="flex flex-col items-center gap-1 text-neutral-400 active:scale-90 active:text-neutral-900 transition-transform"
+                          aria-label="forward 10 seconds"
+                        >
+                          <RotateCw size={20} />
+                          <span className="text-[10px]">10</span>
+                        </button>
+                      </div>
 
                       <div
                         ref={trimTrackRef}
@@ -2457,10 +2734,10 @@ function WalkieApp({ username, userId }) {
                     className={`w-20 h-20 rounded-full flex items-center justify-center transition-colors ${
                       isRecording ? "bg-red-500" : "bg-neutral-900"
                     } ${uploadedFile ? "opacity-30" : ""}`}
-                    aria-label={isRecording ? "stop recording" : "start recording"}
+                    aria-label={isRecording ? "pause recording" : recordSeconds > 0 ? "resume recording" : "start recording"}
                   >
                     {isRecording ? (
-                      <Square size={22} className="text-white" fill="white" />
+                      <Pause size={22} className="text-white" fill="white" />
                     ) : (
                       <Mic size={26} className="text-white" />
                     )}
@@ -2509,6 +2786,8 @@ function WalkieApp({ username, userId }) {
                           setUploadedFile(null);
                           setUploadedFileUrl(null);
                           setUploadedDuration(null);
+                          setRecordSeconds(0);
+                          hasPausedRecordingRef.current = false;
                         }}
                         className="flex-1 border border-neutral-300 text-neutral-700 text-sm font-medium py-3 rounded-full"
                       >
@@ -2528,13 +2807,13 @@ function WalkieApp({ username, userId }) {
                   {recordSeconds > 0 && !isRecording && !uploadedFile && (
                     <div className="mt-6 w-full flex gap-3">
                       <button
-                        onClick={() => setRecordSeconds(0)}
+                        onClick={discardPausedRecording}
                         className="flex-1 border border-neutral-300 text-neutral-700 text-sm font-medium py-3 rounded-full"
                       >
                         back
                       </button>
                       <button
-                        onClick={goToTrimStep}
+                        onClick={handleNextFromRecording}
                         className="flex-1 bg-neutral-900 text-white text-sm font-medium py-3 rounded-full"
                       >
                         next
