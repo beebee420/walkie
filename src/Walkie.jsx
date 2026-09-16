@@ -278,6 +278,19 @@ function WalkieApp({ username, userId }) {
   const [posts, setPosts] = useState([]);
   const [myPosts, setMyPosts] = useState([]);
   const [feedLoading, setFeedLoading] = useState(true);
+  const [showWelcome, setShowWelcome] = useState(() => {
+    try {
+      return !localStorage.getItem("walkie_welcome_seen_v1");
+    } catch {
+      return false;
+    }
+  });
+  const dismissWelcome = () => {
+    setShowWelcome(false);
+    try {
+      localStorage.setItem("walkie_welcome_seen_v1", "1");
+    } catch {}
+  };
   const [feedError, setFeedError] = useState(null);
 
   const shapeRow = (row, ownUsername) => {
@@ -1532,6 +1545,49 @@ function WalkieApp({ username, userId }) {
           className="hidden"
           onError={(e) => console.error("composeAudio element error:", e.currentTarget.error)}
         />
+
+        {/* one-time welcome popup */}
+        {showWelcome && (
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-30 px-6">
+            <div className="relative w-full max-w-xs bg-white rounded-2xl overflow-hidden">
+              <button
+                onClick={dismissWelcome}
+                aria-label="close"
+                className="absolute top-4 right-4 text-neutral-400 z-10"
+              >
+                <X size={18} />
+              </button>
+              <div className="max-h-96 overflow-y-auto p-6 pt-11">
+                <div className="text-sm text-neutral-700 leading-relaxed space-y-3">
+                  <p>
+                    <span className="block text-lg font-semibold text-neutral-900 mb-1">hiya!</span>
+                    thanks for comin on here n playin around. it's fun for me to see this idea play
+                    out, and I hope you enjoy too. use walkie however you want and lemme know what you
+                    notice. that said, few things to tell you:
+                  </p>
+                  <p>1. there's no follow/search system in here. we all share the same feed. aw! cozy.</p>
+                  <p>2. replies are just between you and the person who posted, nobody else sees those.</p>
+                  <p>
+                    3. when you post by upload, videos won't work. :( if you wanna upload a voice memo
+                    from iPhone, you'll need to move it to files first.
+                  </p>
+                  <p className="italic">voice memo &gt; share &gt; more &gt; save to files</p>
+                  <p>
+                    4. finally — although listening to the mixtape while your screen is locked may work
+                    for a couple tracks, it may eventually stall out. bummer! a limitation of using a web
+                    app instead of a "real" one.
+                  </p>
+                  <p>ok! hmm... I wonder what sounds you'll share on here. 🐸</p>
+                  <p>
+                    thanks again,
+                    <br />
+                    bb
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* persistent brand bar */}
         <div className="px-5 pt-3 pb-1 flex justify-center">
