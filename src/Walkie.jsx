@@ -1916,14 +1916,23 @@ function WalkieApp({ username, userId }) {
         {/* profile */}
         {view === "profile" && (
         <div ref={activeScrollRef} className="flex-1 overflow-y-auto pb-24 no-scrollbar">
-          <div className="flex items-center gap-3 px-5 py-5 border-b border-neutral-100">
-            <div className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600">
-              {realUsername[0].toUpperCase()}
+          <div className="flex items-center justify-between gap-3 px-5 py-5 border-b border-neutral-100">
+            <div className="flex items-center gap-3">
+              <div className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600">
+                {realUsername[0].toUpperCase()}
+              </div>
+              <div>
+                <p className="text-sm font-medium text-neutral-900">{realUsername}</p>
+                <p className="text-xs text-neutral-400">{myPosts.length} posts</p>
+              </div>
             </div>
-            <div>
-              <p className="text-sm font-medium text-neutral-900">{realUsername}</p>
-              <p className="text-xs text-neutral-400">{myPosts.length} posts</p>
-            </div>
+            <button
+              onClick={() => setShowWelcome(true)}
+              aria-label="show welcome message"
+              className="w-8 h-8 rounded-full bg-neutral-100 text-neutral-400 flex items-center justify-center text-sm font-medium flex-shrink-0"
+            >
+              ?
+            </button>
           </div>
 
           {myPosts.length === 0 && (
