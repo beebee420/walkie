@@ -1569,7 +1569,7 @@ function WalkieApp({ username, userId }) {
                   <p>2. replies are just between you and the person who posted, nobody else sees those.</p>
                   <p>
                     3. when you post by upload, videos won't work. :( if you wanna upload a voice memo
-                    from iPhone, you'll need to move it to files first.
+                    from iphone, you'll need to move it to files first.
                   </p>
                   <p className="italic">voice memo &gt; share &gt; more &gt; save to files</p>
                   <p>
