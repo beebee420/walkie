@@ -377,6 +377,7 @@ function WalkieApp({ username, userId }) {
   // infinite scroll: load the next page automatically as the bottom of the
   // feed comes into view, instead of loading everything up front
   const feedSentinelRef = useRef(null);
+  const feedScrollRef = useRef(null);
   const loadMorePostsRef = useRef(loadMorePosts);
   loadMorePostsRef.current = loadMorePosts;
 
@@ -395,7 +396,7 @@ function WalkieApp({ username, userId }) {
       (entries) => {
         if (entries[0].isIntersecting) loadMorePostsRef.current();
       },
-      { rootMargin: "400px" }
+      { root: feedScrollRef.current, rootMargin: "400px" }
     );
     observer.observe(el);
     return () => observer.disconnect();
@@ -446,6 +447,8 @@ function WalkieApp({ username, userId }) {
   const playheadRef = useRef(0);
   const clipDurationRef = useRef(0);
   const mainAudioRef = useRef(null);
+  const preloadAudioRef = useRef(null);
+  const preloadedUrlRef = useRef(null);
   const audioMetaRef = useRef({ offset: 0, duration: 0 });
   const composeAudioRef = useRef(null);
   const windowDragRef = useRef({ startValue: 0, startLeft: 0, startRight: 0, startPlayhead: 0 });
@@ -624,6 +627,21 @@ function WalkieApp({ username, userId }) {
     if (!audio || audio.__priming) return;
     const meta = audioMetaRef.current;
     const rel = audio.currentTime - meta.offset;
+
+    // a few seconds before this track ends, start fetching the next one in
+    // the background so the actual transition can hit the browser's cache
+    // instead of kicking off a fresh fetch right at the transition moment —
+    // that fresh-fetch timing is what tends to stall out while the screen is locked
+    if (mixtape && rel >= meta.duration - 5) {
+      const idx = mixtapeQueue.findIndex((p) => p.id === mixtapeCurrentId);
+      const next = mixtapeQueue[idx + 1];
+      if (next?.audioUrl && preloadedUrlRef.current !== next.audioUrl && preloadAudioRef.current) {
+        preloadedUrlRef.current = next.audioUrl;
+        preloadAudioRef.current.src = next.audioUrl;
+        preloadAudioRef.current.load();
+      }
+    }
+
     if (rel >= meta.duration - 0.05) {
       audio.pause();
       setProgress(meta.duration);
@@ -1522,6 +1540,7 @@ function WalkieApp({ username, userId }) {
           onEnded={handleMainEnded}
           onError={(e) => console.error("mainAudio element error:", e.currentTarget.error)}
         />
+        <audio ref={preloadAudioRef} className="hidden" preload="auto" />
         <audio
           ref={composeAudioRef}
           className="hidden"
@@ -1605,7 +1624,7 @@ function WalkieApp({ username, userId }) {
 
         {/* feed */}
         {view === "feed" && (
-        <div className="flex-1 overflow-y-auto pb-24 [scrollbar-gutter:stable]">
+        <div ref={feedScrollRef} className="flex-1 overflow-y-auto pb-24 [scrollbar-gutter:stable]">
           {posts.map((post) => {
             const isPlaying = playingId === post.id;
             const pct = (isPlaying || loadedIdRef.current === post.id) ? Math.min(100, (progress / post.duration) * 100) : 0;
