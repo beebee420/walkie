@@ -1568,10 +1568,10 @@ function WalkieApp({ username, userId }) {
                   <p>1. there's no follow/search system in here. we all share the same feed. aw! cozy.</p>
                   <p>2. replies are just between you and the person who posted, nobody else sees those.</p>
                   <p>
-                    3. when you post by upload, videos won't work. :( if you wanna upload a voice memo
+                    3. when you post by upload, videos won't work. :( if you wanna upload a memo
                     from iphone, you'll need to move it to files first.
                   </p>
-                  <p className="italic">voice memo &gt; share &gt; more &gt; save to files</p>
+                  <p className="italic">memo &gt; share &gt; more &gt; save to files</p>
                   <p>
                     4. finally — although listening to the mixtape while your screen is locked may work
                     for a couple tracks, it may eventually stall out. bummer! a limitation of using a web
