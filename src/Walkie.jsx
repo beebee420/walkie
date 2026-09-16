@@ -1255,13 +1255,14 @@ function WalkieApp({ username, userId }) {
       setIsRecording(false);
       if (mediaRecorderRef.current && mediaRecorderRef.current.state === "recording") {
         mediaRecorderRef.current.pause();
-        hasPausedRecordingRef.current = true;
       }
       return;
     }
 
-    // resuming a session we already paused
+    // resuming a session we already paused — this is the actual signal that
+    // the recording has more than one segment, worth confirming before finalizing
     if (mediaRecorderRef.current && mediaRecorderRef.current.state === "paused") {
+      hasPausedRecordingRef.current = true;
       mediaRecorderRef.current.resume();
       setIsRecording(true);
       recordIntervalRef.current = setInterval(() => {
@@ -2269,7 +2270,7 @@ function WalkieApp({ username, userId }) {
 
         {/* finish recording confirmation */}
         {showFinishRecordingConfirm && (
-          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-20 px-6">
+          <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-20 px-6 pb-32">
             <div className="w-full max-w-xs bg-white rounded-2xl p-5">
               <p className="text-sm font-medium text-neutral-900 text-center">are you finished recording?</p>
               <div className="flex gap-3 mt-5">
@@ -2508,7 +2509,7 @@ function WalkieApp({ username, userId }) {
                         <div
                           onMouseDown={startWindowDrag}
                           onTouchStart={startWindowDrag}
-                          className={`absolute top-0 h-full rounded-full cursor-grab ${
+                          className={`absolute top-0 h-full rounded-full cursor-grab touch-none ${
                             waveform.length > 0 ? "bg-transparent" : "bg-neutral-900"
                           }`}
                           style={{ left: `${leftPct}%`, width: `${Math.max(0, rightPct - leftPct)}%` }}
@@ -2524,7 +2525,7 @@ function WalkieApp({ username, userId }) {
                             trimDragRef.current = "left";
                             setActiveDragHandle("left");
                           }}
-                          className="absolute top-1/2 cursor-ew-resize"
+                          className="absolute top-1/2 cursor-ew-resize touch-none"
                           style={{
                             left: `${leftPct}%`,
                             transform: "translate(-12px, -32px)",
@@ -2547,7 +2548,7 @@ function WalkieApp({ username, userId }) {
                             trimDragRef.current = "right";
                             setActiveDragHandle("right");
                           }}
-                          className="absolute top-1/2 cursor-ew-resize"
+                          className="absolute top-1/2 cursor-ew-resize touch-none"
                           style={{
                             left: `${rightPct}%`,
                             transform: "translate(-18px, -32px)",
@@ -2578,10 +2579,19 @@ function WalkieApp({ username, userId }) {
                               composeAudioRef.current.pause();
                             }
                           }}
-                          className="absolute top-1/2 w-3 h-3 bg-white border-2 border-neutral-900 rounded-full cursor-grab shadow-sm transition-transform"
-                          style={{ left: `${pct}%`, transform: `translate(-50%, -50%) scale(${activeDragHandle === "playhead" ? 1.5 : 1})` }}
+                          className="absolute top-1/2 z-20 cursor-grab touch-none"
+                          style={{
+                            left: `${pct}%`,
+                            transform: "translate(-22px, -22px)",
+                            padding: "16px",
+                          }}
                           aria-label="playhead"
-                        />
+                        >
+                          <div
+                            className="w-3 h-3 bg-white border-2 border-neutral-900 rounded-full shadow-sm transition-transform"
+                            style={{ transform: `scale(${activeDragHandle === "playhead" ? 1.5 : 1})` }}
+                          />
+                        </div>
                       </div>
 
                       <div className="flex justify-between w-full mt-4 text-xs text-neutral-400">
