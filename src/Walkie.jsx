@@ -1557,7 +1557,8 @@ function WalkieApp({ username, userId }) {
               >
                 <X size={18} />
               </button>
-              <div className="max-h-96 overflow-y-auto p-6 pt-11">
+              <div className="pt-10 pb-5 px-6">
+                <div className="max-h-80 overflow-y-auto pr-1">
                 <div className="text-sm text-neutral-700 leading-relaxed space-y-3">
                   <p>
                     <span className="block text-lg font-semibold text-neutral-900 mb-1">hiya!</span>
@@ -1584,6 +1585,7 @@ function WalkieApp({ username, userId }) {
                     bb
                   </p>
                 </div>
+              </div>
               </div>
             </div>
           </div>
