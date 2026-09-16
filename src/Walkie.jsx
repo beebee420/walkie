@@ -374,9 +374,8 @@ function WalkieApp({ username, userId }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // infinite scroll: load the next page automatically as the bottom of the
-  // feed comes into view, instead of loading everything up front
-  const feedSentinelRef = useRef(null);
+  // infinite scroll: load the next page automatically as you near the
+  // bottom of the feed, instead of loading everything up front
   const feedScrollRef = useRef(null);
   const loadMorePostsRef = useRef(loadMorePosts);
   loadMorePostsRef.current = loadMorePosts;
@@ -389,18 +388,12 @@ function WalkieApp({ username, userId }) {
   const [mixtapeCurrentId, setMixtapeCurrentId] = useState(null);
   const [view, setView] = useState("feed"); // feed | profile | userProfile
 
-  useEffect(() => {
-    const el = feedSentinelRef.current;
-    if (!el || view !== "feed") return;
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting) loadMorePostsRef.current();
-      },
-      { root: feedScrollRef.current, rootMargin: "400px" }
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [view]);
+  const handleFeedScroll = (e) => {
+    const el = e.currentTarget;
+    if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) {
+      loadMorePostsRef.current();
+    }
+  };
 
   const [modalMode, setModalMode] = useState(null); // null | record | reply
   const [viewedUser, setViewedUser] = useState(null);
@@ -447,8 +440,6 @@ function WalkieApp({ username, userId }) {
   const playheadRef = useRef(0);
   const clipDurationRef = useRef(0);
   const mainAudioRef = useRef(null);
-  const preloadAudioRef = useRef(null);
-  const preloadedUrlRef = useRef(null);
   const audioMetaRef = useRef({ offset: 0, duration: 0 });
   const composeAudioRef = useRef(null);
   const windowDragRef = useRef({ startValue: 0, startLeft: 0, startRight: 0, startPlayhead: 0 });
@@ -627,20 +618,6 @@ function WalkieApp({ username, userId }) {
     if (!audio || audio.__priming) return;
     const meta = audioMetaRef.current;
     const rel = audio.currentTime - meta.offset;
-
-    // a few seconds before this track ends, start fetching the next one in
-    // the background so the actual transition can hit the browser's cache
-    // instead of kicking off a fresh fetch right at the transition moment —
-    // that fresh-fetch timing is what tends to stall out while the screen is locked
-    if (mixtape && rel >= meta.duration - 5) {
-      const idx = mixtapeQueue.findIndex((p) => p.id === mixtapeCurrentId);
-      const next = mixtapeQueue[idx + 1];
-      if (next?.audioUrl && preloadedUrlRef.current !== next.audioUrl && preloadAudioRef.current) {
-        preloadedUrlRef.current = next.audioUrl;
-        preloadAudioRef.current.src = next.audioUrl;
-        preloadAudioRef.current.load();
-      }
-    }
 
     if (rel >= meta.duration - 0.05) {
       audio.pause();
@@ -1540,7 +1517,6 @@ function WalkieApp({ username, userId }) {
           onEnded={handleMainEnded}
           onError={(e) => console.error("mainAudio element error:", e.currentTarget.error)}
         />
-        <audio ref={preloadAudioRef} className="hidden" preload="auto" />
         <audio
           ref={composeAudioRef}
           className="hidden"
@@ -1624,7 +1600,11 @@ function WalkieApp({ username, userId }) {
 
         {/* feed */}
         {view === "feed" && (
-        <div ref={feedScrollRef} className="flex-1 overflow-y-auto pb-24 [scrollbar-gutter:stable]">
+        <div
+          ref={feedScrollRef}
+          onScroll={handleFeedScroll}
+          className="flex-1 overflow-y-auto pb-24 [scrollbar-gutter:stable]"
+        >
           {posts.map((post) => {
             const isPlaying = playingId === post.id;
             const pct = (isPlaying || loadedIdRef.current === post.id) ? Math.min(100, (progress / post.duration) * 100) : 0;
@@ -2001,7 +1981,6 @@ function WalkieApp({ username, userId }) {
             );
           })}
 
-          <div ref={feedSentinelRef} className="h-1" />
           {loadingMorePosts && (
             <p className="text-center text-xs text-neutral-400 py-4">loading more...</p>
           )}
