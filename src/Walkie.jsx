@@ -376,7 +376,7 @@ function WalkieApp({ username, userId }) {
 
   // infinite scroll: load the next page automatically as you near the
   // bottom of the feed, instead of loading everything up front
-  const feedScrollRef = useRef(null);
+  const activeScrollRef = useRef(null);
   const loadMorePostsRef = useRef(loadMorePosts);
   loadMorePostsRef.current = loadMorePosts;
 
@@ -1508,7 +1508,17 @@ function WalkieApp({ username, userId }) {
   }
 
   return (
-    <div className="h-dvh bg-neutral-50 flex justify-center">
+    <div
+      className="h-dvh bg-neutral-50 flex justify-center"
+      onWheel={(e) => {
+        // only forward when the wheel event originated on this outer
+        // background itself (the empty desktop margins), not bubbled up
+        // from the inner scrollable column — that already scrolls natively
+        if (e.target === e.currentTarget && activeScrollRef.current) {
+          activeScrollRef.current.scrollTop += e.deltaY;
+        }
+      }}
+    >
       <div className="w-full max-w-sm bg-white h-dvh flex flex-col border-x border-neutral-200">
         <audio
           ref={mainAudioRef}
@@ -1601,7 +1611,7 @@ function WalkieApp({ username, userId }) {
         {/* feed */}
         {view === "feed" && (
         <div
-          ref={feedScrollRef}
+          ref={activeScrollRef}
           onScroll={handleFeedScroll}
           className="flex-1 overflow-y-auto pb-24 no-scrollbar"
         >
@@ -1798,7 +1808,7 @@ function WalkieApp({ username, userId }) {
 
         {/* single user's profile */}
         {view === "userProfile" && (
-        <div className="flex-1 overflow-y-auto pb-24 no-scrollbar">
+        <div ref={activeScrollRef} className="flex-1 overflow-y-auto pb-24 no-scrollbar">
           {posts
             .filter((p) => p.user === viewedUser)
             .map((post) => {
@@ -1849,7 +1859,7 @@ function WalkieApp({ username, userId }) {
 
         {/* profile */}
         {view === "profile" && (
-        <div className="flex-1 overflow-y-auto pb-24 no-scrollbar">
+        <div ref={activeScrollRef} className="flex-1 overflow-y-auto pb-24 no-scrollbar">
           <div className="flex items-center gap-3 px-5 py-5 border-b border-neutral-100">
             <div className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600">
               {realUsername[0].toUpperCase()}
