@@ -335,6 +335,7 @@ function WalkieApp({ username, userId }) {
       setMyPosts(withReplies.filter((p) => p.user === ME));
       postsOffsetRef.current = postsRes.data.length;
       setHasMorePosts(postsRes.data.length === POSTS_PAGE_SIZE);
+      console.log("[walkie] initial feed load — rows:", postsRes.data.length, "offset now:", postsOffsetRef.current, "hasMorePosts:", postsRes.data.length === POSTS_PAGE_SIZE);
     } catch (err) {
       console.error("failed to load feed:", err);
       setFeedError("couldn't load the feed — check your connection and try refreshing");
@@ -344,6 +345,7 @@ function WalkieApp({ username, userId }) {
   };
 
   const loadMorePosts = async () => {
+    console.log("[walkie] loadMorePosts called. loadingMorePosts:", loadingMorePosts, "hasMorePosts:", hasMorePosts, "offset:", postsOffsetRef.current);
     if (loadingMorePosts || !hasMorePosts) return;
     setLoadingMorePosts(true);
     try {
@@ -353,6 +355,7 @@ function WalkieApp({ username, userId }) {
         .select("*, profiles(username)")
         .order("created_at", { ascending: false })
         .range(from, from + POSTS_PAGE_SIZE - 1);
+      console.log("[walkie] loadMorePosts result — error:", error, "rows returned:", data?.length, data);
       if (error) throw error;
 
       const shaped = data.map((row) => shapeRow(row));
@@ -390,7 +393,9 @@ function WalkieApp({ username, userId }) {
 
   const handleFeedScroll = (e) => {
     const el = e.currentTarget;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) {
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    console.log("[walkie] feed scroll — scrollHeight:", el.scrollHeight, "scrollTop:", el.scrollTop, "clientHeight:", el.clientHeight, "distanceFromBottom:", distanceFromBottom);
+    if (distanceFromBottom < 600) {
       loadMorePostsRef.current();
     }
   };
