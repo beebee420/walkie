@@ -1603,7 +1603,7 @@ function WalkieApp({ username, userId }) {
         <div
           ref={feedScrollRef}
           onScroll={handleFeedScroll}
-          className="flex-1 overflow-y-auto pb-24 [scrollbar-gutter:stable]"
+          className="flex-1 overflow-y-auto pb-24 no-scrollbar"
         >
           {posts.map((post) => {
             const isPlaying = playingId === post.id;
@@ -1798,7 +1798,7 @@ function WalkieApp({ username, userId }) {
 
         {/* single user's profile */}
         {view === "userProfile" && (
-        <div className="flex-1 overflow-y-auto pb-24 [scrollbar-gutter:stable]">
+        <div className="flex-1 overflow-y-auto pb-24 no-scrollbar">
           {posts
             .filter((p) => p.user === viewedUser)
             .map((post) => {
@@ -1849,7 +1849,7 @@ function WalkieApp({ username, userId }) {
 
         {/* profile */}
         {view === "profile" && (
-        <div className="flex-1 overflow-y-auto pb-24 [scrollbar-gutter:stable]">
+        <div className="flex-1 overflow-y-auto pb-24 no-scrollbar">
           <div className="flex items-center gap-3 px-5 py-5 border-b border-neutral-100">
             <div className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600">
               {realUsername[0].toUpperCase()}
