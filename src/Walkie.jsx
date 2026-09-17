@@ -1671,7 +1671,7 @@ function WalkieApp({ username, userId }) {
         <div
           ref={activeScrollRef}
           onScroll={handleFeedScroll}
-          className="flex-1 overflow-y-auto pb-24 no-scrollbar"
+          className={`flex-1 overflow-y-auto no-scrollbar ${mixtape && currentPost ? "pb-44" : "pb-24"}`}
         >
           {posts.map((post) => {
             const isPlaying = playingId === post.id;
@@ -1866,7 +1866,7 @@ function WalkieApp({ username, userId }) {
 
         {/* single user's profile */}
         {view === "userProfile" && (
-        <div ref={activeScrollRef} className="flex-1 overflow-y-auto pb-24 no-scrollbar">
+        <div ref={activeScrollRef} className={`flex-1 overflow-y-auto no-scrollbar ${mixtape && currentPost ? "pb-44" : "pb-24"}`}>
           {posts
             .filter((p) => p.user === viewedUser)
             .map((post) => {
@@ -1917,7 +1917,7 @@ function WalkieApp({ username, userId }) {
 
         {/* profile */}
         {view === "profile" && (
-        <div ref={activeScrollRef} className="flex-1 overflow-y-auto pb-24 no-scrollbar">
+        <div ref={activeScrollRef} className={`flex-1 overflow-y-auto no-scrollbar ${mixtape && currentPost ? "pb-44" : "pb-24"}`}>
           <div className="flex items-center justify-between gap-3 px-5 py-5 border-b border-neutral-100">
             <div className="flex items-center gap-3">
               <div className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600">
