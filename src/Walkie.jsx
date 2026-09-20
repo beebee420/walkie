@@ -1939,7 +1939,7 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
               )}
             </button>
             <div>
-              <p className="text-sm font-medium text-neutral-900">{viewedUser}</p>
+              <p className="text-2xl font-semibold text-neutral-900">{viewedUser}</p>
               <p className="text-xs text-neutral-400">
                 {posts.filter((p) => p.user === viewedUser).length} posts
               </p>
@@ -2028,7 +2028,7 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
                 />
               </div>
               <div>
-                <p className="text-sm font-medium text-neutral-900">{realUsername}</p>
+                <p className="text-2xl font-semibold text-neutral-900">{realUsername}</p>
                 <p className="text-xs text-neutral-400">{myPosts.length} posts</p>
               </div>
             </div>
