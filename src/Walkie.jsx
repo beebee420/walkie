@@ -1624,31 +1624,14 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
           </div>
         )}
 
-        {/* persistent brand bar */}
-        <div className="px-5 pt-3 pb-1 flex justify-center">
-          <span
-            className="text-xs font-bold text-neutral-700"
-            style={{ letterSpacing: "0.9em", paddingLeft: "0.9em", fontFamily: "'Roboto Slab', serif" }}
-          >
-            walkie
-          </span>
-        </div>
-
         {/* header */}
         <div className="flex items-center justify-between px-5 pt-1 pb-4 border-b border-neutral-100">
-          {view === "userProfile" ? (
-            <button onClick={() => setView("feed")} aria-label="back" className="flex items-center gap-2">
-              <ArrowLeft size={18} className="text-neutral-500" />
-              <span className="text-sm font-medium text-neutral-500">back to feed</span>
-            </button>
-          ) : (
-            <h1
-              className="text-3xl font-bold tracking-wide text-neutral-900"
-              style={{ fontFamily: "'Roboto Slab', serif" }}
-            >
-              walkie
-            </h1>
-          )}
+          <h1
+            className="text-3xl font-bold tracking-wide text-neutral-900"
+            style={{ fontFamily: "'Roboto Slab', serif" }}
+          >
+            walkie
+          </h1>
 
           {view === "feed" &&
             (mixtape ? (
@@ -1701,6 +1684,17 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
               </button>
             ))}
         </div>
+
+        {view === "userProfile" && (
+          <button
+            onClick={() => setView("feed")}
+            aria-label="back"
+            className="flex items-center gap-2 px-5 pt-3 pb-1"
+          >
+            <ArrowLeft size={18} className="text-neutral-500" />
+            <span className="text-sm font-medium text-neutral-500">back to feed</span>
+          </button>
+        )}
 
         {/* feed */}
         {view === "feed" && (
