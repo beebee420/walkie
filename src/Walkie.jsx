@@ -267,6 +267,7 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
   const displayName = (u) => (u === ME ? realUsername : u);
   const [myAvatarUrl, setMyAvatarUrl] = useState(initialAvatarUrl);
   const [avatarUploading, setAvatarUploading] = useState(false);
+  const [showAvatarViewer, setShowAvatarViewer] = useState(false);
   const profileAvatarInputRef = useRef(null);
 
   const handleProfileAvatarSelect = async (e) => {
@@ -1579,6 +1580,30 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
           onError={(e) => console.error("composeAudio element error:", e.currentTarget.error)}
         />
 
+        {/* full-size profile picture viewer */}
+        {showAvatarViewer && (
+          <div
+            onClick={() => setShowAvatarViewer(false)}
+            className="fixed inset-0 bg-black/80 flex items-center justify-center z-30 px-6"
+          >
+            <button
+              onClick={() => setShowAvatarViewer(false)}
+              aria-label="close"
+              className="absolute top-6 right-6 text-white z-10"
+            >
+              <X size={22} />
+            </button>
+            {(view === "profile" ? myAvatarUrl : viewedUserAvatarUrl) && (
+              <img
+                src={view === "profile" ? myAvatarUrl : viewedUserAvatarUrl}
+                alt=""
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-sm aspect-square rounded-2xl object-cover"
+              />
+            )}
+          </div>
+        )}
+
         {/* one-time welcome popup */}
         {showWelcome && (
           <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-30 px-6">
@@ -1902,13 +1927,17 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
         {view === "userProfile" && (
         <div ref={activeScrollRef} className={`flex-1 overflow-y-auto no-scrollbar ${mixtape && currentPost ? "pb-44" : "pb-24"}`}>
           <div className="flex items-center gap-3 px-5 py-5 border-b border-neutral-100">
-            <div className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600 overflow-hidden flex-shrink-0">
+            <button
+              onClick={() => viewedUserAvatarUrl && setShowAvatarViewer(true)}
+              aria-label="view profile picture"
+              className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600 overflow-hidden flex-shrink-0 active:opacity-80"
+            >
               {viewedUserAvatarUrl ? (
                 <img src={viewedUserAvatarUrl} alt="" className="w-14 h-14 object-cover" />
               ) : (
                 viewedUser[0]?.toUpperCase()
               )}
-            </div>
+            </button>
             <div>
               <p className="text-sm font-medium text-neutral-900">{viewedUser}</p>
               <p className="text-xs text-neutral-400">
@@ -1969,21 +1998,27 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
         <div ref={activeScrollRef} className={`flex-1 overflow-y-auto no-scrollbar ${mixtape && currentPost ? "pb-44" : "pb-24"}`}>
           <div className="flex items-center justify-between gap-3 px-5 py-5 border-b border-neutral-100">
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => profileAvatarInputRef.current?.click()}
-                aria-label="change profile picture"
-                className="relative w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600 active:opacity-80"
-              >
-                {avatarUploading ? (
-                  <span className="text-[10px] text-neutral-500">...</span>
-                ) : myAvatarUrl ? (
-                  <img src={myAvatarUrl} alt="" className="w-14 h-14 rounded-full object-cover" />
-                ) : (
-                  realUsername[0].toUpperCase()
-                )}
-                <div className="absolute bottom-0 right-0 w-5 h-5 rounded-full bg-neutral-900 flex items-center justify-center border-2 border-white">
+              <div className="relative w-14 h-14 flex-shrink-0">
+                <button
+                  onClick={() => myAvatarUrl && setShowAvatarViewer(true)}
+                  aria-label="view profile picture"
+                  className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600 active:opacity-80"
+                >
+                  {avatarUploading ? (
+                    <span className="text-[10px] text-neutral-500">...</span>
+                  ) : myAvatarUrl ? (
+                    <img src={myAvatarUrl} alt="" className="w-14 h-14 rounded-full object-cover" />
+                  ) : (
+                    realUsername[0].toUpperCase()
+                  )}
+                </button>
+                <button
+                  onClick={() => profileAvatarInputRef.current?.click()}
+                  aria-label="change profile picture"
+                  className="absolute bottom-0 right-0 w-5 h-5 rounded-full bg-neutral-900 flex items-center justify-center border-2 border-white active:opacity-80"
+                >
                   <Camera size={9} className="text-white" />
-                </div>
+                </button>
                 <input
                   ref={profileAvatarInputRef}
                   type="file"
@@ -1991,7 +2026,7 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
                   onChange={handleProfileAvatarSelect}
                   className="hidden"
                 />
-              </button>
+              </div>
               <div>
                 <p className="text-sm font-medium text-neutral-900">{realUsername}</p>
                 <p className="text-xs text-neutral-400">{myPosts.length} posts</p>
