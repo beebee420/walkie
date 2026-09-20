@@ -3135,7 +3135,27 @@ export default function Walkie() {
         loadProfileFor(sess);
       }
     });
-    return () => listener.subscription.unsubscribe();
+
+    // on iOS, tapping the magic link from Mail always opens it in Safari
+    // proper — a separate window from a home-screen-installed app, even
+    // though they share the same login session underneath. This instance
+    // has no way to know a session appeared elsewhere until it checks again,
+    // so re-check whenever the person switches back to this app.
+    const recheckOnFocus = () => {
+      if (document.visibilityState !== "visible") return;
+      supabase.auth.getSession().then(({ data: { session: sess } }) => {
+        if (sess) {
+          setSession(sess);
+          loadProfileFor(sess);
+        }
+      });
+    };
+    document.addEventListener("visibilitychange", recheckOnFocus);
+
+    return () => {
+      listener.subscription.unsubscribe();
+      document.removeEventListener("visibilitychange", recheckOnFocus);
+    };
   }, []);
 
   const submitPasscode = (e) => {
@@ -3251,7 +3271,8 @@ export default function Walkie() {
               {stage === "email" && "enter an email to send a link to"}
               {stage === "sent" && (
                 <>
-                  tap the link sent to <span className="text-neutral-900">{emailInput.trim()}</span>
+                  tap the link sent to <span className="text-neutral-900">{emailInput.trim()}</span>,
+                  then come back to this app
                 </>
               )}
             </p>
