@@ -434,12 +434,21 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
   const [mixtapeCurrentId, setMixtapeCurrentId] = useState(null);
   const [view, setView] = useState("feed"); // feed | profile | userProfile
 
+  const feedScrollPositionRef = useRef(0);
+
   const handleFeedScroll = (e) => {
     const el = e.currentTarget;
+    feedScrollPositionRef.current = el.scrollTop;
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) {
       loadMorePostsRef.current();
     }
   };
+
+  useEffect(() => {
+    if (view === "feed" && activeScrollRef.current) {
+      activeScrollRef.current.scrollTop = feedScrollPositionRef.current;
+    }
+  }, [view]);
 
   const [modalMode, setModalMode] = useState(null); // null | record | reply
   const [viewedUser, setViewedUser] = useState(null);
