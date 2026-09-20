@@ -1639,19 +1639,10 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
           {view === "userProfile" ? (
             <button onClick={() => setView("feed")} aria-label="back" className="flex items-center gap-2">
               <ArrowLeft size={18} className="text-neutral-500" />
-              <div className="w-7 h-7 rounded-full bg-neutral-200 flex items-center justify-center text-xs font-medium text-neutral-600 overflow-hidden flex-shrink-0">
-                {viewedUserAvatarUrl ? (
-                  <img src={viewedUserAvatarUrl} alt="" className="w-7 h-7 object-cover" />
-                ) : (
-                  viewedUser[0]?.toUpperCase()
-                )}
-              </div>
-              <span className="text-xl font-semibold tracking-tight text-neutral-900">{viewedUser}</span>
+              <span className="text-sm font-medium text-neutral-500">back to feed</span>
             </button>
           ) : (
-            <h1 className="text-xl font-semibold tracking-tight text-neutral-900">
-              {view === "profile" ? "your posts" : "feed"}
-            </h1>
+            <div />
           )}
 
           {view === "feed" &&
@@ -1660,7 +1651,7 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
                 onClick={stopMixtape}
                 className="flex items-center gap-1.5 text-xs font-medium text-white bg-neutral-900 px-3 py-1.5 rounded-full"
               >
-                <Volume2 size={13} /> mixtape on
+                <Volume2 size={13} /> turn off mixtape
               </button>
             ) : (
               <button
@@ -1677,7 +1668,7 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
                 onClick={stopMixtape}
                 className="flex items-center gap-1.5 text-xs font-medium text-white bg-neutral-900 px-3 py-1.5 rounded-full"
               >
-                <Volume2 size={13} /> mixtape on
+                <Volume2 size={13} /> turn off mixtape
               </button>
             ) : (
               <button
@@ -1694,7 +1685,7 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
                 onClick={stopMixtape}
                 className="flex items-center gap-1.5 text-xs font-medium text-white bg-neutral-900 px-3 py-1.5 rounded-full"
               >
-                <Volume2 size={13} /> mixtape on
+                <Volume2 size={13} /> turn off mixtape
               </button>
             ) : (
               <button
@@ -1911,6 +1902,21 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
         {/* single user's profile */}
         {view === "userProfile" && (
         <div ref={activeScrollRef} className={`flex-1 overflow-y-auto no-scrollbar ${mixtape && currentPost ? "pb-44" : "pb-24"}`}>
+          <div className="flex items-center gap-3 px-5 py-5 border-b border-neutral-100">
+            <div className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600 overflow-hidden flex-shrink-0">
+              {viewedUserAvatarUrl ? (
+                <img src={viewedUserAvatarUrl} alt="" className="w-14 h-14 object-cover" />
+              ) : (
+                viewedUser[0]?.toUpperCase()
+              )}
+            </div>
+            <div>
+              <p className="text-sm font-medium text-neutral-900">{viewedUser}</p>
+              <p className="text-xs text-neutral-400">
+                {posts.filter((p) => p.user === viewedUser).length} posts
+              </p>
+            </div>
+          </div>
           {posts
             .filter((p) => p.user === viewedUser)
             .map((post) => {
