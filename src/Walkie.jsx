@@ -1642,7 +1642,12 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
               <span className="text-sm font-medium text-neutral-500">back to feed</span>
             </button>
           ) : (
-            <div />
+            <h1
+              className="text-3xl font-bold tracking-wide text-neutral-900"
+              style={{ fontFamily: "'Roboto Slab', serif" }}
+            >
+              walkie
+            </h1>
           )}
 
           {view === "feed" &&
