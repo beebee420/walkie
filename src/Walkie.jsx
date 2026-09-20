@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Play, Pause, Mic, X, SkipForward, SkipBack, Radio, User, ArrowLeft, Volume2, Maximize2, RotateCcw, RotateCw, Plus } from "lucide-react";
+import { Play, Pause, Mic, X, SkipForward, SkipBack, Radio, User, ArrowLeft, Volume2, Maximize2, RotateCcw, RotateCw, Plus, Camera } from "lucide-react";
 import { supabase } from "./lib/supabaseClient";
 import { FFmpeg } from "@ffmpeg/ffmpeg";
 import { fetchFile } from "@ffmpeg/util";
@@ -259,12 +259,43 @@ function playFrom(audio, time) {
   }
 }
 
-function WalkieApp({ username, userId }) {
+function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
   // internally, "you" is still the sentinel used for all the "is this me?"
   // comparisons — displayName() below is the only thing that swaps in the
   // real chosen username wherever it's actually shown on screen.
   const realUsername = username;
   const displayName = (u) => (u === ME ? realUsername : u);
+  const [myAvatarUrl, setMyAvatarUrl] = useState(initialAvatarUrl);
+  const [avatarUploading, setAvatarUploading] = useState(false);
+  const profileAvatarInputRef = useRef(null);
+
+  const handleProfileAvatarSelect = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarUploading(true);
+    try {
+      const newUrl = await uploadAvatarToStorage(file, userId);
+      const { error } = await supabase.from("profiles").update({ avatar_url: newUrl }).eq("id", userId);
+      if (error) throw error;
+
+      setMyAvatarUrl(newUrl);
+      // patch already-loaded posts/replies of mine so the new picture shows
+      // immediately everywhere, without needing a refresh
+      const patchOwn = (list) =>
+        list.map((p) => ({
+          ...p,
+          avatarUrl: p.user === ME ? newUrl : p.avatarUrl,
+          replies: (p.replies || []).map((r) => (r.user === ME ? { ...r, avatarUrl: newUrl } : r)),
+        }));
+      setPosts(patchOwn);
+      setMyPosts(patchOwn);
+    } catch (err) {
+      console.error("failed to update profile picture:", err);
+    } finally {
+      setAvatarUploading(false);
+      e.target.value = "";
+    }
+  };
 
   useEffect(() => {
     if (document.getElementById("walkie-slab-font")) return;
@@ -298,6 +329,7 @@ function WalkieApp({ username, userId }) {
     return {
       id: row.id,
       user: row.user_id === userId ? ME : joinedProfile?.username || "unknown",
+      avatarUrl: row.user_id === userId ? myAvatarUrl : joinedProfile?.avatar_url || null,
       duration: row.duration,
       caption: row.caption ?? undefined,
       timestamp: timeAgo(row.created_at),
@@ -321,13 +353,13 @@ function WalkieApp({ username, userId }) {
       const [postsRes, repliesRes] = await Promise.all([
         supabase
           .from("posts")
-          .select("*, profiles(username)")
+          .select("*, profiles(username, avatar_url)")
           .order("created_at", { ascending: false })
           .range(0, POSTS_PAGE_SIZE - 1),
         // replies are already scoped by RLS to just your own posts' replies
         // and replies you've sent — a naturally small, per-user set — so
         // these aren't paginated for now, only the open-ended posts feed is.
-        supabase.from("replies").select("*, profiles(username)").order("created_at", { ascending: true }),
+        supabase.from("replies").select("*, profiles(username, avatar_url)").order("created_at", { ascending: true }),
       ]);
       if (postsRes.error) throw postsRes.error;
       if (repliesRes.error) throw repliesRes.error;
@@ -363,7 +395,7 @@ function WalkieApp({ username, userId }) {
       const from = postsOffsetRef.current;
       const { data, error } = await supabase
         .from("posts")
-        .select("*, profiles(username)")
+        .select("*, profiles(username, avatar_url)")
         .order("created_at", { ascending: false })
         .range(from, from + POSTS_PAGE_SIZE - 1);
       if (error) throw error;
@@ -410,6 +442,7 @@ function WalkieApp({ username, userId }) {
 
   const [modalMode, setModalMode] = useState(null); // null | record | reply
   const [viewedUser, setViewedUser] = useState(null);
+  const viewedUserAvatarUrl = posts.find((p) => p.user === viewedUser)?.avatarUrl || null;
   const [replyTarget, setReplyTarget] = useState(null);
   const [recordSeconds, setRecordSeconds] = useState(0);
   const [isRecording, setIsRecording] = useState(false);
@@ -1606,6 +1639,13 @@ function WalkieApp({ username, userId }) {
           {view === "userProfile" ? (
             <button onClick={() => setView("feed")} aria-label="back" className="flex items-center gap-2">
               <ArrowLeft size={18} className="text-neutral-500" />
+              <div className="w-7 h-7 rounded-full bg-neutral-200 flex items-center justify-center text-xs font-medium text-neutral-600 overflow-hidden flex-shrink-0">
+                {viewedUserAvatarUrl ? (
+                  <img src={viewedUserAvatarUrl} alt="" className="w-7 h-7 object-cover" />
+                ) : (
+                  viewedUser[0]?.toUpperCase()
+                )}
+              </div>
               <span className="text-xl font-semibold tracking-tight text-neutral-900">{viewedUser}</span>
             </button>
           ) : (
@@ -1683,8 +1723,12 @@ function WalkieApp({ username, userId }) {
                     onClick={() => openUserProfile(post.user)}
                     className="flex items-center gap-2 active:opacity-70"
                   >
-                    <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-xs font-medium text-neutral-600">
-                      {displayName(post.user)[0].toUpperCase()}
+                    <div className="w-8 h-8 rounded-full bg-neutral-200 flex items-center justify-center text-xs font-medium text-neutral-600 overflow-hidden">
+                      {post.avatarUrl ? (
+                        <img src={post.avatarUrl} alt="" className="w-8 h-8 object-cover" />
+                      ) : (
+                        displayName(post.user)[0].toUpperCase()
+                      )}
                     </div>
                     <div className="text-left">
                       <p className="text-sm font-medium text-neutral-900">{displayName(post.user)}</p>
@@ -1920,9 +1964,29 @@ function WalkieApp({ username, userId }) {
         <div ref={activeScrollRef} className={`flex-1 overflow-y-auto no-scrollbar ${mixtape && currentPost ? "pb-44" : "pb-24"}`}>
           <div className="flex items-center justify-between gap-3 px-5 py-5 border-b border-neutral-100">
             <div className="flex items-center gap-3">
-              <div className="w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600">
-                {realUsername[0].toUpperCase()}
-              </div>
+              <button
+                onClick={() => profileAvatarInputRef.current?.click()}
+                aria-label="change profile picture"
+                className="relative w-14 h-14 rounded-full bg-neutral-200 flex items-center justify-center text-base font-medium text-neutral-600 active:opacity-80"
+              >
+                {avatarUploading ? (
+                  <span className="text-[10px] text-neutral-500">...</span>
+                ) : myAvatarUrl ? (
+                  <img src={myAvatarUrl} alt="" className="w-14 h-14 rounded-full object-cover" />
+                ) : (
+                  realUsername[0].toUpperCase()
+                )}
+                <div className="absolute bottom-0 right-0 w-5 h-5 rounded-full bg-neutral-900 flex items-center justify-center border-2 border-white">
+                  <Camera size={9} className="text-white" />
+                </div>
+                <input
+                  ref={profileAvatarInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={handleProfileAvatarSelect}
+                  className="hidden"
+                />
+              </button>
               <div>
                 <p className="text-sm font-medium text-neutral-900">{realUsername}</p>
                 <p className="text-xs text-neutral-400">{myPosts.length} posts</p>
@@ -2079,10 +2143,14 @@ function WalkieApp({ username, userId }) {
                     e.stopPropagation();
                     openUserProfile(currentPost.user);
                   }}
-                  className="w-9 h-9 rounded-full bg-neutral-700 flex items-center justify-center text-sm font-medium flex-shrink-0 active:opacity-80"
+                  className="w-9 h-9 rounded-full bg-neutral-700 flex items-center justify-center text-sm font-medium flex-shrink-0 active:opacity-80 overflow-hidden"
                   aria-label={`go to ${displayName(currentPost.user)}'s profile`}
                 >
-                  {displayName(currentPost.user)[0].toUpperCase()}
+                  {currentPost.avatarUrl ? (
+                    <img src={currentPost.avatarUrl} alt="" className="w-9 h-9 object-cover" />
+                  ) : (
+                    displayName(currentPost.user)[0].toUpperCase()
+                  )}
                 </button>
 
                 <div className="min-w-0">
@@ -2169,10 +2237,14 @@ function WalkieApp({ username, userId }) {
               <div className="flex-1 flex flex-col items-center justify-center px-8 text-center">
                 <button
                   onClick={() => openUserProfile(currentPost.user)}
-                  className="w-28 h-28 rounded-full bg-neutral-700 flex items-center justify-center text-3xl font-medium mb-6 active:opacity-80"
+                  className="w-28 h-28 rounded-full bg-neutral-700 flex items-center justify-center text-3xl font-medium mb-6 active:opacity-80 overflow-hidden"
                   aria-label={`go to ${displayName(currentPost.user)}'s profile`}
                 >
-                  {displayName(currentPost.user)[0].toUpperCase()}
+                  {currentPost.avatarUrl ? (
+                    <img src={currentPost.avatarUrl} alt="" className="w-28 h-28 object-cover" />
+                  ) : (
+                    displayName(currentPost.user)[0].toUpperCase()
+                  )}
                 </button>
 
                 <button
@@ -2924,18 +2996,56 @@ function WalkieApp({ username, userId }) {
 
 const APP_PASSCODE = import.meta.env.VITE_APP_PASSCODE;
 
+// uploads a selected profile picture to the 'avatars' bucket, returning its
+// public URL (not just the storage path, since profiles.avatar_url is read
+// directly by <img> tags all over the app rather than resolved on the fly)
+async function uploadAvatarToStorage(file, userId) {
+  const ext = (file.name.match(/\.[a-zA-Z0-9]+$/)?.[0] || ".jpg").toLowerCase();
+  const path = `${userId}/${Date.now()}${ext}`;
+  const { error } = await supabase.storage.from("avatars").upload(path, file, {
+    contentType: file.type || "image/jpeg",
+  });
+  if (error) throw error;
+  return supabase.storage.from("avatars").getPublicUrl(path).data.publicUrl;
+}
+
+const AUTH_STEPS = ["passcode", "email", "sent"];
+
+function AuthProgressDots({ stage }) {
+  const stepIndex = AUTH_STEPS.indexOf(stage);
+  if (stepIndex === -1) return null;
+  return (
+    <div className="flex items-center gap-2 mt-2 mb-6">
+      {AUTH_STEPS.map((s, i) => (
+        <div
+          key={s}
+          className={`w-2 h-2 rounded-full transition-colors ${
+            i <= stepIndex ? "bg-neutral-900" : "bg-neutral-300"
+          }`}
+        />
+      ))}
+    </div>
+  );
+}
+
 export default function Walkie() {
-  const [stage, setStage] = useState("loading"); // loading | passcode | username | ready
+  const [stage, setStage] = useState("loading"); // loading | passcode | email | sent | setup | ready
   const [session, setSession] = useState(null);
   const [profile, setProfile] = useState(null);
 
   const [passcodeInput, setPasscodeInput] = useState("");
   const [passcodeError, setPasscodeError] = useState("");
-  const [checkingPasscode, setCheckingPasscode] = useState(false);
+
+  const [emailInput, setEmailInput] = useState("");
+  const [emailError, setEmailError] = useState("");
+  const [sendingLink, setSendingLink] = useState(false);
 
   const [usernameInput, setUsernameInput] = useState("");
   const [usernameError, setUsernameError] = useState("");
   const [submittingUsername, setSubmittingUsername] = useState(false);
+  const [avatarFile, setAvatarFile] = useState(null);
+  const [avatarPreviewUrl, setAvatarPreviewUrl] = useState(null);
+  const avatarInputRef = useRef(null);
 
   const loadProfileFor = async (sess) => {
     const { data, error } = await supabase
@@ -2946,14 +3056,14 @@ export default function Walkie() {
 
     if (error) {
       console.error("failed to load profile:", error);
-      setStage("username");
+      setStage("setup");
       return;
     }
     if (data) {
       setProfile(data);
       setStage("ready");
     } else {
-      setStage("username");
+      setStage("setup");
     }
   };
 
@@ -2966,9 +3076,20 @@ export default function Walkie() {
         setStage("passcode");
       }
     });
+
+    // catches the moment a magic link finishes signing someone in — whether
+    // that resolves faster than the initial getSession() call above, or
+    // happens later (the link opened in a fresh tab/session)
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, sess) => {
+      if (sess) {
+        setSession(sess);
+        loadProfileFor(sess);
+      }
+    });
+    return () => listener.subscription.unsubscribe();
   }, []);
 
-  const submitPasscode = async (e) => {
+  const submitPasscode = (e) => {
     e.preventDefault();
     setPasscodeError("");
 
@@ -2980,19 +3101,39 @@ export default function Walkie() {
       setPasscodeError("that's not it — try again");
       return;
     }
+    setStage("email");
+  };
 
-    setCheckingPasscode(true);
-    const { data, error } = await supabase.auth.signInAnonymously();
-    setCheckingPasscode(false);
+  const submitEmail = async (e) => {
+    e.preventDefault();
+    setEmailError("");
 
-    if (error || !data?.session) {
-      console.error("anonymous sign-in failed:", error);
-      setPasscodeError("couldn't connect — try again in a moment");
+    const trimmed = emailInput.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+      setEmailError("that doesn't look like a valid email");
       return;
     }
 
-    setSession(data.session);
-    await loadProfileFor(data.session);
+    setSendingLink(true);
+    const { error } = await supabase.auth.signInWithOtp({
+      email: trimmed,
+      options: { emailRedirectTo: window.location.origin },
+    });
+    setSendingLink(false);
+
+    if (error) {
+      console.error("failed to send magic link:", error);
+      setEmailError("couldn't send that link — try again in a moment");
+      return;
+    }
+    setStage("sent");
+  };
+
+  const handleAvatarSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAvatarFile(file);
+    setAvatarPreviewUrl(URL.createObjectURL(file));
   };
 
   const submitUsername = async (e) => {
@@ -3010,25 +3151,30 @@ export default function Walkie() {
     }
 
     setSubmittingUsername(true);
-    const { data, error } = await supabase
-      .from("profiles")
-      .insert({ id: session.user.id, username: trimmed })
-      .select()
-      .single();
-    setSubmittingUsername(false);
+    try {
+      let avatarUrl = null;
+      if (avatarFile) {
+        avatarUrl = await uploadAvatarToStorage(avatarFile, session.user.id);
+      }
+      const { data, error } = await supabase
+        .from("profiles")
+        .insert({ id: session.user.id, username: trimmed, avatar_url: avatarUrl })
+        .select()
+        .single();
+      if (error) throw error;
 
-    if (error) {
+      setProfile(data);
+      setStage("ready");
+    } catch (error) {
       if (error.code === "23505") {
         setUsernameError("that username's taken — try another");
       } else {
         console.error("failed to create profile:", error);
         setUsernameError("something went wrong — try again");
       }
-      return;
+    } finally {
+      setSubmittingUsername(false);
     }
-
-    setProfile(data);
-    setStage("ready");
   };
 
   if (stage === "loading") {
@@ -3039,53 +3185,121 @@ export default function Walkie() {
     );
   }
 
-  if (stage === "passcode") {
+  if (["passcode", "email", "sent"].includes(stage)) {
     return (
       <div className="min-h-screen bg-neutral-50 flex justify-center">
-        <div className="w-full max-w-sm bg-white min-h-screen flex flex-col items-center justify-center px-8 border-x border-neutral-200">
-          <p
-            className="text-sm font-bold text-neutral-700 mb-8"
-            style={{ letterSpacing: "0.9em", paddingLeft: "0.9em", fontFamily: "'Roboto Slab', serif" }}
-          >
-            walkie
-          </p>
-          <form onSubmit={submitPasscode} className="w-full">
-            <input
-              type="password"
-              value={passcodeInput}
-              onChange={(e) => setPasscodeInput(e.target.value)}
-              placeholder="passcode"
-              autoFocus
-              className="w-full text-center text-sm border border-neutral-300 rounded-full px-4 py-3 focus:outline-none focus:border-neutral-500"
-            />
-            {passcodeError && (
-              <p className="text-xs text-red-500 text-center mt-2">{passcodeError}</p>
-            )}
-            <button
-              type="submit"
-              disabled={checkingPasscode}
-              className="mt-4 w-full bg-neutral-900 text-white text-sm font-medium py-3 rounded-full disabled:opacity-50"
+        <div className="w-full max-w-sm bg-white min-h-screen flex flex-col border-x border-neutral-200">
+          <div className="pb-8 flex flex-col items-center" style={{ paddingTop: "28vh" }}>
+            <h1
+              className="text-3xl font-bold tracking-wide text-neutral-900"
+              style={{ fontFamily: "'Roboto Slab', serif" }}
             >
-              {checkingPasscode ? "checking..." : "enter"}
-            </button>
-          </form>
+              walkie
+            </h1>
+            <AuthProgressDots stage={stage} />
+            <p className="text-sm text-neutral-500 text-center px-8">
+              {stage === "passcode" && "enter the passcode I gave ya"}
+              {stage === "email" && "enter an email to send a link to"}
+              {stage === "sent" && (
+                <>
+                  tap the link sent to <span className="text-neutral-900">{emailInput.trim()}</span>
+                </>
+              )}
+            </p>
+          </div>
+
+          <div className="flex flex-col items-center px-8">
+            {stage === "passcode" && (
+              <form onSubmit={submitPasscode} className="w-full">
+                <input
+                  type="password"
+                  value={passcodeInput}
+                  onChange={(e) => setPasscodeInput(e.target.value)}
+                  placeholder="passcode"
+                  autoFocus
+                  className="w-full text-center text-sm border border-neutral-300 rounded-full px-4 py-3 focus:outline-none focus:border-neutral-500"
+                />
+                {passcodeError && (
+                  <p className="text-xs text-red-500 text-center mt-2">{passcodeError}</p>
+                )}
+                <button
+                  type="submit"
+                  className="mt-4 w-full bg-neutral-900 text-white text-sm font-medium py-3 rounded-full"
+                >
+                  enter
+                </button>
+              </form>
+            )}
+
+            {stage === "email" && (
+              <form onSubmit={submitEmail} className="w-full">
+                <input
+                  type="email"
+                  value={emailInput}
+                  onChange={(e) => setEmailInput(e.target.value)}
+                  placeholder="you@example.com"
+                  autoFocus
+                  className="w-full text-center text-sm border border-neutral-300 rounded-full px-4 py-3 focus:outline-none focus:border-neutral-500"
+                />
+                {emailError && (
+                  <p className="text-xs text-red-500 text-center mt-2">{emailError}</p>
+                )}
+                <button
+                  type="submit"
+                  disabled={sendingLink}
+                  className="mt-4 w-full bg-neutral-900 text-white text-sm font-medium py-3 rounded-full disabled:opacity-50"
+                >
+                  {sendingLink ? "sending..." : "send link"}
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       </div>
     );
   }
 
-  if (stage === "username") {
+  if (stage === "setup") {
     return (
       <div className="min-h-screen bg-neutral-50 flex justify-center">
-        <div className="w-full max-w-sm bg-white min-h-screen flex flex-col items-center justify-center px-8 border-x border-neutral-200">
-          <p className="text-lg font-semibold text-neutral-900 mb-1">pick a username</p>
-          <p className="text-xs text-neutral-400 mb-6 text-center">this is how others will see you</p>
-          <form onSubmit={submitUsername} className="w-full">
+        <div className="w-full max-w-sm bg-white min-h-screen flex flex-col border-x border-neutral-200">
+          <div className="pb-8 flex flex-col items-center" style={{ paddingTop: "28vh" }}>
+            <h1
+              className="text-3xl font-bold tracking-wide text-neutral-900"
+              style={{ fontFamily: "'Roboto Slab', serif" }}
+            >
+              walkie
+            </h1>
+          </div>
+
+          <form onSubmit={submitUsername} className="w-full flex flex-col items-center px-8">
+            <button
+              type="button"
+              onClick={() => avatarInputRef.current?.click()}
+              className="relative w-24 h-24 rounded-full bg-neutral-100 flex items-center justify-center mb-6 active:opacity-80"
+            >
+              {avatarPreviewUrl ? (
+                <img src={avatarPreviewUrl} alt="" className="w-24 h-24 rounded-full object-cover" />
+              ) : (
+                <User size={26} className="text-neutral-400" />
+              )}
+              <div className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-neutral-900 flex items-center justify-center border-2 border-white">
+                <Camera size={14} className="text-white" />
+              </div>
+              <input
+                ref={avatarInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleAvatarSelect}
+                className="hidden"
+              />
+            </button>
+
             <input
               type="text"
               value={usernameInput}
               onChange={(e) => setUsernameInput(e.target.value)}
-              placeholder="username"
+              placeholder="pick a username"
               autoFocus
               className="w-full text-center text-sm border border-neutral-300 rounded-full px-4 py-3 focus:outline-none focus:border-neutral-500"
             />
@@ -3105,5 +3319,5 @@ export default function Walkie() {
     );
   }
 
-  return <WalkieApp username={profile.username} userId={profile.id} />;
+  return <WalkieApp username={profile.username} userId={profile.id} avatarUrl={profile.avatar_url} />;
 }
