@@ -3357,7 +3357,7 @@ export default function Walkie() {
                   inputMode="numeric"
                   value={codeInput}
                   onChange={(e) => setCodeInput(e.target.value)}
-                  placeholder="6-digit code"
+                  placeholder="8-digit code"
                   autoFocus
                   className="w-full text-center text-sm border border-neutral-300 rounded-full px-4 py-3 focus:outline-none focus:border-neutral-500"
                 />
