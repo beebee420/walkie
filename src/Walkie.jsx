@@ -3088,6 +3088,9 @@ export default function Walkie() {
   const [emailInput, setEmailInput] = useState("");
   const [emailError, setEmailError] = useState("");
   const [sendingLink, setSendingLink] = useState(false);
+  const [codeInput, setCodeInput] = useState("");
+  const [codeError, setCodeError] = useState("");
+  const [verifyingCode, setVerifyingCode] = useState(false);
 
   const [usernameInput, setUsernameInput] = useState("");
   const [usernameError, setUsernameError] = useState("");
@@ -3198,6 +3201,34 @@ export default function Walkie() {
     setStage("sent");
   };
 
+  const submitCode = async (e) => {
+    e.preventDefault();
+    setCodeError("");
+
+    const trimmed = codeInput.trim();
+    if (!trimmed) {
+      setCodeError("enter the code from the email");
+      return;
+    }
+
+    setVerifyingCode(true);
+    const { data, error } = await supabase.auth.verifyOtp({
+      email: emailInput.trim(),
+      token: trimmed,
+      type: "email",
+    });
+    setVerifyingCode(false);
+
+    if (error || !data?.session) {
+      console.error("failed to verify code:", error);
+      setCodeError("that code didn't work — check it and try again");
+      return;
+    }
+
+    setSession(data.session);
+    await loadProfileFor(data.session);
+  };
+
   const handleAvatarSelect = (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -3268,13 +3299,8 @@ export default function Walkie() {
             <AuthProgressDots stage={stage} />
             <p className="text-sm text-neutral-500 text-center px-8">
               {stage === "passcode" && "enter the passcode I gave ya"}
-              {stage === "email" && "enter an email to send a link to"}
-              {stage === "sent" && (
-                <>
-                  tap the link sent to <span className="text-neutral-900">{emailInput.trim()}</span>,
-                  then come back to this app
-                </>
-              )}
+              {stage === "email" && "enter an email to send a code to"}
+              {stage === "sent" && "enter the code sent to your email"}
             </p>
           </div>
 
@@ -3319,7 +3345,38 @@ export default function Walkie() {
                   disabled={sendingLink}
                   className="mt-4 w-full bg-neutral-900 text-white text-sm font-medium py-3 rounded-full disabled:opacity-50"
                 >
-                  {sendingLink ? "sending..." : "send link"}
+                  {sendingLink ? "sending..." : "send code"}
+                </button>
+              </form>
+            )}
+
+            {stage === "sent" && (
+              <form onSubmit={submitCode} className="w-full">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={codeInput}
+                  onChange={(e) => setCodeInput(e.target.value)}
+                  placeholder="6-digit code"
+                  autoFocus
+                  className="w-full text-center text-sm border border-neutral-300 rounded-full px-4 py-3 focus:outline-none focus:border-neutral-500"
+                />
+                {codeError && (
+                  <p className="text-xs text-red-500 text-center mt-2">{codeError}</p>
+                )}
+                <button
+                  type="submit"
+                  disabled={verifyingCode}
+                  className="mt-4 w-full bg-neutral-900 text-white text-sm font-medium py-3 rounded-full disabled:opacity-50"
+                >
+                  {verifyingCode ? "checking..." : "verify"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStage("email")}
+                  className="mt-3 text-xs text-neutral-400 underline w-full text-center"
+                >
+                  use a different email
                 </button>
               </form>
             )}
