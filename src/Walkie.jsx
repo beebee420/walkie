@@ -323,6 +323,10 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
       localStorage.setItem("walkie_welcome_seen_v1", "1");
     } catch {}
   };
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    window.location.reload();
+  };
   const [feedError, setFeedError] = useState(null);
 
   const shapeRow = (row, ownUsername) => {
@@ -2041,13 +2045,21 @@ function WalkieApp({ username, userId, avatarUrl: initialAvatarUrl }) {
                 <p className="text-xs text-neutral-400">{myPosts.length} posts</p>
               </div>
             </div>
-            <button
-              onClick={() => setShowWelcome(true)}
-              aria-label="show welcome message"
-              className="w-8 h-8 rounded-full bg-neutral-100 text-neutral-400 flex items-center justify-center text-sm font-medium flex-shrink-0"
-            >
-              ?
-            </button>
+            <div className="flex flex-col items-center gap-2 flex-shrink-0">
+              <button
+                onClick={() => setShowWelcome(true)}
+                aria-label="show welcome message"
+                className="w-8 h-8 rounded-full bg-neutral-100 text-neutral-400 flex items-center justify-center text-sm font-medium"
+              >
+                ?
+              </button>
+              <button
+                onClick={handleLogout}
+                className="text-xs text-neutral-400"
+              >
+                log out
+              </button>
+            </div>
           </div>
 
           {myPosts.length === 0 && (
@@ -3100,13 +3112,11 @@ export default function Walkie() {
   const avatarInputRef = useRef(null);
 
   const loadProfileFor = async (sess) => {
-    console.log("[walkie] loadProfileFor — session user id:", sess.user.id, "email:", sess.user.email);
     const { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", sess.user.id)
       .maybeSingle();
-    console.log("[walkie] profile lookup result — data:", data, "error:", error);
 
     if (error) {
       console.error("failed to load profile:", error);
