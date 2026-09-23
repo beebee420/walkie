@@ -3100,11 +3100,13 @@ export default function Walkie() {
   const avatarInputRef = useRef(null);
 
   const loadProfileFor = async (sess) => {
+    console.log("[walkie] loadProfileFor — session user id:", sess.user.id, "email:", sess.user.email);
     const { data, error } = await supabase
       .from("profiles")
       .select("*")
       .eq("id", sess.user.id)
       .maybeSingle();
+    console.log("[walkie] profile lookup result — data:", data, "error:", error);
 
     if (error) {
       console.error("failed to load profile:", error);
